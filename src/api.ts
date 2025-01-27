@@ -415,4 +415,25 @@ export class Api extends EventEmitter {
             return [];
         }
     }
+
+    public async launchDiscord() {
+        log('Launching Discord');
+        const result = await this.serverApi.callPluginMethod<{}, boolean>('launch_discord', {});
+        if(result.success && result.result) {
+            log('Launched Discord');
+        } else {
+            log('Failed to launch Discord', result);
+        }
+        return result.success && result.result;
+    }
+
+    public async isAutoStartDiscordEnabled() {
+        const result = await this.serverApi.callPluginMethod<{}, boolean>('get_setting_auto_start_discord', {});
+        return result.success && result.result;
+    }
+
+    public async setAutoStartDiscord(value: boolean) {
+        log('Setting value for auto start discord : ', value);
+        await this.serverApi.callPluginMethod<{ value:boolean }, boolean>('set_setting_auto_start_discord', { value });
+    }
 }

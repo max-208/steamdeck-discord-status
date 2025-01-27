@@ -4,8 +4,11 @@ import os
 import socket
 import struct
 import uuid
-
+from settings import SettingsManager
+import subprocess
 import decky_plugin
+
+settingsDir = os.environ["DECKY_PLUGIN_SETTINGS_DIR"]
 
 CLIENT_ID = "1055680235682672682"
 
@@ -97,8 +100,56 @@ class Pipe:
         self.socket.send(payload)
 
 class Plugin:
+
+    _settings = None
+    _setting_auto_start_discord = False
+
     async def debug(self, args):
         decky_plugin.logger.debug("Called with %s ", args)
+
+    async def load_settings(self):
+        decky_plugin.logger.info("loading settings : ")
+        self._settings = SettingsManager(name="decky-steamdeck-discord-status",settings_directory=settingsDir)
+        self._settings.read()
+        self._setting_auto_start_discord = self._settings.getSetting("auto_start_discord", False)
+        decky_plugin.logger.info("- auto_start_discord : %s", self._setting_auto_start_discord)
+
+        # needed for initialization
+        await self.save_settings(self)
+        return
+
+    async def save_settings(self):
+        decky_plugin.logger.info("saving settings")
+        decky_plugin.logger.info("- auto_start_discord : %s", self._setting_auto_start_discord)
+        self._settings.setSetting("auto_start_discord", self._setting_auto_start_discord)
+        return
+
+    async def get_setting_auto_start_discord(self):
+        return self._setting_auto_start_discord
+    
+    async def set_setting_auto_start_discord(self, value: bool):
+        self._setting_auto_start_discord = value
+        self.save_settings(self)
+
+    async def launch_discord(self):
+        decky_plugin.logger.info("Launching Discord")
+
+        flatpak_env = dict(os.environ)
+        flatpak_env.pop("LD_LIBRARY_PATH", None)
+        flatpak_env["XDG_RUNTIME_DIR"] = "/run/user/1000"
+        flatpak_env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
+        flatpak_env["XDG_SESSION_TYPE"] = "wayland"
+        flatpak_env["WAYLAND_DISPLAY"] = "wayland-0"
+        flatpak_env["DISPLAY"] = ":0"
+
+        proc = await asyncio.create_subprocess_shell(
+            "flatpak run com.discordapp.Discord --start-minimized",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=flatpak_env
+        )
+        decky_plugin.logger.info("Launched Discord with PID %s", proc.pid)
+        return await self.is_connected(self)
 
     async def clear_activity(self):
         if self.pipe is None:
@@ -194,10 +245,13 @@ class Plugin:
     # Asyncio-compatible long-running code, executed in a task when the plugin is loaded
     async def _main(self):
         decky_plugin.logger.info("Starting Discord status plugin")
-
+        await self.load_settings(self)
+        if(self._setting_auto_start_discord):
+            await self.launch_discord(self)
         await self.is_connected(self)
 
     
     # Function called first during the unload process, utilize this to handle your plugin being removed
     async def _unload(self):
         self.disconnect(self)
+        await self.save_settings(self)
